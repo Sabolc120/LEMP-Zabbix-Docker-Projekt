@@ -1,0 +1,164 @@
+version: "3.8"
+
+services:
+  load-balancer:
+    image: nginx:latest
+    container_name: load-balancer
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./lb-nginx/nginx.conf:/etc/nginx/nginx.conf
+      - lb_cache:/var/cache/nginx
+    networks:
+      - lemp-net
+    depends_on:
+      - webszerver-1
+      - webszerver-2
+
+  webszerver-1:
+    build:
+      context: ./webservice
+      dockerfile: Dockerfile
+    container_name: webszerver-1
+    hostname: webszerver-1
+    env_file:
+      - .env
+    depends_on:
+      - mariadb
+    environment:
+      MARIADB_HOST: ${MARIADB_HOST}
+      MARIADB_DATABASE: ${MARIADB_DATABASE}
+      MARIADB_USER:  ${MARIADB_USER}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+    volumes:
+      - ./public_html:/var/www/html
+      - ./webservice/nginx.conf:/etc/nginx/nginx.conf
+      - ./webservice/php.ini:/usr/local/etc/php/php.ini
+      - ./mariadb/ssl:/etc/ssl:ro
+      - ./webservice/zabbix_agentd.conf:/etc/zabbix/zabbix_agentd.conf:ro
+    networks:
+      - lemp-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  webszerver-2:
+    build:
+      context: ./webservice
+      dockerfile: Dockerfile
+    container_name: webszerver-2
+    hostname: webszerver-2
+    env_file:
+      - .env
+    depends_on:
+      - mariadb
+    environment:
+      MARIADB_HOST: ${MARIADB_HOST}
+      MARIADB_DATABASE: ${MARIADB_DATABASE}
+      MARIADB_USER: ${MARIADB_USER}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+    volumes:
+      - ./public_html:/var/www/html
+      - ./webservice/nginx.conf:/etc/nginx/nginx.conf
+      - ./webservice/php.ini:/usr/local/etc/php/php.ini
+      - ./mariadb/ssl:/etc/ssl:ro
+      - ./webservice/zabbix_agentd.conf:/etc/zabbix/zabbix_agentd.conf:ro
+    networks:
+      - lemp-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mariadb:
+    image: mariadb:10.5
+    container_name: mariadb
+    env_file:
+      - .env
+    restart: always
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${MARIADB_DATABASE}
+      MARIADB_USER: ${MARIADB_USER}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+      MARIADB_DEFAULT_AUTHENTICATION_PLUGIN: mysql_native_password
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./mariadb/init:/docker-entrypoint-initdb.d
+      - ./mariadb/ssl:/etc/ssl:ro
+    command: >
+      --ssl-ca=/etc/ssl/ca-cert.pem
+      --ssl-cert=/etc/ssl/server-cert.pem
+      --ssl-key=/etc/ssl/server-key.pem
+    networks:
+      - lemp-net
+
+  zabbix-server:
+    image: zabbix/zabbix-server-mysql:ubuntu-7.0-latest
+    container_name: zbx-server
+    env_file:
+      - .env
+    environment:
+      DB_SERVER_HOST: ${DB_SERVER_HOST}
+      DB_SERVER_PORT: ${DB_SERVER_PORT}
+      DB_SERVER_DBNAME: ${DB_SERVER_DBNAME}
+      DB_SERVER_DBUSER: ${DB_SERVER_DBUSER}
+      DB_SERVER_DBPASSWORD: ${DB_SERVER_DBPASSWORD}
+      DB_SERVER_ROOT_PASSWORD: ${DB_SERVER_ROOT_PASSWORD}
+      MYSQL_USER: ${MARIADB_USER}
+      MYSQL_PASSWORD: ${MARIADB_PASSWORD}
+      default-authentication-plugin: mysql_native_password
+      DB_TLSConnect: verify-ca
+      MYSQL_SSL_CA: /etc/ssl/ca-cert.pem
+      MYSQL_SSL_CERT: /etc/ssl/client-cert.pem
+      MYSQL_SSL_KEY: /etc/ssl/client-key.pem
+      ZBX_LISTENIP: 0.0.0.0 
+    volumes:
+      - ./mariadb/ssl:/etc/ssl:ro
+      - ./zabbix-logs:/var/log/zabbix:rw
+    ports:
+      - "10051:10051"
+    networks:
+      - lemp-net
+    restart: unless-stopped
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-mysql:alpine-7.0-latest
+    container_name: zbx-web
+    env_file:
+      - .env
+    environment:
+      DB_SERVER_HOST: mariadb
+      DB_SERVER_PORT: 3306
+      DB_SERVER_DBNAME: ${DB_SERVER_DBNAME}
+      DB_SERVER_DBUSER: ${DB_SERVER_DBUSER}
+      DB_SERVER_DBPASSWORD: ${DB_SERVER_DBPASSWORD}
+      ZBX_SERVER_HOST: ${ZBX_SERVER_HOST}
+      MYSQL_ROOT_PASSWORD: megfeleloen_eros_jelszo_1
+      PHP_TZ: Europe/Budapest
+      MYSQL_USER: ${MARIADB_USER}
+      MYSQL_PASSWORD: ${MARIADB_PASSWORD}
+      DB_TLSConnect: verify-ca
+      MYSQL_SSL_CA: /etc/ssl/ca-cert.pem
+      MYSQL_SSL_CERT: /etc/ssl/client-cert.pem
+      MYSQL_SSL_KEY: /etc/ssl/client-key.pem
+    volumes:
+      - ./mariadb/ssl:/etc/ssl:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - lemp-net
+    restart: unless-stopped
+
+
+networks:
+  lemp-net:
+    driver: bridge 
+
+volumes:
+  mariadb_data:
+  lb_cache:
